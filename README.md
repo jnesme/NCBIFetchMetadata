@@ -1,10 +1,10 @@
 # BioSample Metadata Fetcher
 
-Automated scripts to fetch BioSample metadata from NCBI Assembly accession numbers and output as clean TSV files.
+Automated scripts to fetch BioSample metadata from NCBI Assembly or GenBank nucleotide accession numbers and output as clean TSV files.
 
 ## Features
 
-- Fetches BioSample metadata linked to Assembly accessions
+- Fetches BioSample metadata linked to Assembly or nucleotide accessions
 - Automatic retry logic for failed requests
 - Rate limiting to respect NCBI guidelines
 - Properly handles commas in field values (e.g., geographic locations)
@@ -33,7 +33,12 @@ export PATH=${PATH}:${HOME}/edirect
 **Usage:**
 ```bash
 chmod +x fetch_biosample_metadata.sh
+
+# Assembly accessions (default)
 ./fetch_biosample_metadata.sh AssemblyAcNu.txt BioSampleMetadata.tsv
+
+# Nucleotide accessions
+./fetch_biosample_metadata.sh nucleotide_ids.txt BioSampleMetadata.tsv nucleotide
 ```
 
 **Advantages:**
@@ -57,8 +62,11 @@ pip install biopython
 
 **Usage:**
 ```bash
-# Basic usage
+# Basic usage (Assembly accessions, default)
 python fetch_biosample_metadata.py AssemblyAcNu.txt BioSampleMetadata.tsv
+
+# Nucleotide accessions
+python fetch_biosample_metadata.py nucleotide_ids.txt BioSampleMetadata.tsv --db nucleotide
 
 # With custom email (recommended by NCBI)
 python fetch_biosample_metadata.py AssemblyAcNu.txt BioSampleMetadata.tsv --email your@email.com
@@ -71,20 +79,27 @@ python fetch_biosample_metadata.py AssemblyAcNu.txt BioSampleMetadata.tsv --dela
 - More portable (works on any system with Python)
 - Better error handling and reporting
 - Easier to customize and extend
-- Adds assembly_accession and biosample_accession to output
+- Adds accession column (assembly_accession or nucleotide_accession) and biosample_accession to output
 
 ---
 
 ## Input Format
 
-Create a text file with one Assembly accession per line:
+Create a text file with one accession per line. Use `--db` (Python) or the 3rd positional argument (Bash) to select the database type.
 
-**AssemblyAcNu.txt:**
+**Assembly accessions (default):**
 ```
 GCA_048058675.1
 GCA_048058775.1
 GCA_048058575.1
 GCA_048058475.1
+```
+
+**Nucleotide accessions:**
+```
+FJ457244.1
+MN908947.3
+LC528232.1
 ```
 
 ---
@@ -170,8 +185,9 @@ Both scripts include:
 - If persistent, increase sleep delay in the script
 
 **"EMPTY RESULT"**
-- Assembly accession may not have linked BioSample
+- The accession may not have a linked BioSample
 - Check accession number is correct
+- Make sure you're using the right database (`assembly` vs `nucleotide`)
 
 ### Python Script Issues:
 
@@ -205,7 +221,22 @@ EOF
 ./fetch_biosample_metadata.sh assemblies.txt output.tsv
 ```
 
-### Example 2: Python with Custom Settings
+### Example 2: Nucleotide Accessions
+```bash
+# Create input file with nucleotide accessions
+cat > nucleotide_ids.txt << EOF
+FJ457244.1
+MN908947.3
+EOF
+
+# Bash
+./fetch_biosample_metadata.sh nucleotide_ids.txt output.tsv nucleotide
+
+# Python
+python fetch_biosample_metadata.py nucleotide_ids.txt output.tsv --db nucleotide
+```
+
+### Example 3: Python with Custom Settings
 ```bash
 python fetch_biosample_metadata.py \
     assemblies.txt \
@@ -214,7 +245,7 @@ python fetch_biosample_metadata.py \
     --delay 0.4
 ```
 
-### Example 3: Process Large Dataset
+### Example 4: Process Large Dataset
 ```bash
 # Split large file into chunks of 100
 split -l 100 large_assemblies.txt chunk_

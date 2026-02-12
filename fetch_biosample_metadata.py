@@ -2,10 +2,11 @@
 
 """
 Script: fetch_biosample_metadata.py
-Description: Fetch BioSample metadata from Assembly accession numbers
-             and output as a clean TSV file with proper handling of commas
-Usage: python fetch_biosample_metadata.py <input_file> <output_file> [--email your@email.com]
+Description: Fetch BioSample metadata from Assembly or nucleotide accession
+             numbers and output as a clean TSV file with proper handling of commas
+Usage: python fetch_biosample_metadata.py <input_file> <output_file> [--db assembly|nucleotide] [--email your@email.com]
 Example: python fetch_biosample_metadata.py AssemblyAcNu.txt BioSampleMetadata.tsv
+         python fetch_biosample_metadata.py nucleotide_ids.txt output.tsv --db nucleotide
 """
 
 import sys
@@ -35,14 +36,49 @@ KNOWN_ATTRIBUTES = {
 }
 
 
+def fetch_biosample_record(biosample_id, accession_label):
+    """
+    Fetch and parse a BioSample record given its NCBI ID.
+
+    Args:
+        biosample_id: NCBI internal BioSample ID
+        accession_label: Original accession string (for log messages)
+
+    Returns:
+        Dictionary of BioSample attributes or None if failed
+    """
+    handle = Entrez.efetch(db="biosample", id=biosample_id, retmode="xml")
+    biosample_records = Entrez.read(handle)
+    handle.close()
+
+    if not biosample_records:
+        print(f"  WARNING: Empty BioSample record for {accession_label}")
+        return None
+
+    biosample_record = biosample_records[0]
+    attributes = {}
+
+    if 'Accession' in biosample_record:
+        attributes['biosample_accession'] = biosample_record['Accession']
+
+    if 'Attributes' in biosample_record:
+        for attr in biosample_record['Attributes']:
+            attr_name = attr.get('attribute_name', 'unknown')
+            attr_value = attr.get('content', '')
+            if attr_name in KNOWN_ATTRIBUTES or attr_name == 'biosample_accession':
+                attributes[attr_name] = attr_value
+
+    return attributes
+
+
 def fetch_biosample_from_assembly(assembly_acc, max_retries=3):
     """
     Fetch BioSample metadata from an Assembly accession number
-    
+
     Args:
         assembly_acc: Assembly accession number (e.g., GCA_048058675.1)
         max_retries: Maximum number of retry attempts
-        
+
     Returns:
         Dictionary of BioSample attributes or None if failed
     """
@@ -52,52 +88,26 @@ def fetch_biosample_from_assembly(assembly_acc, max_retries=3):
             handle = Entrez.esearch(db="assembly", term=assembly_acc)
             record = Entrez.read(handle)
             handle.close()
-            
+
             if not record['IdList']:
                 print(f"  WARNING: No assembly found for {assembly_acc}")
                 return None
-            
+
             assembly_id = record['IdList'][0]
-            
+
             # Link to BioSample
             handle = Entrez.elink(dbfrom="assembly", db="biosample", id=assembly_id)
             link_record = Entrez.read(handle)
             handle.close()
-            
+
             # Check if link exists
             if not link_record[0]['LinkSetDb']:
                 print(f"  WARNING: No BioSample linked to {assembly_acc}")
                 return None
-            
+
             biosample_id = link_record[0]['LinkSetDb'][0]['Link'][0]['Id']
-            
-            # Fetch BioSample data
-            handle = Entrez.efetch(db="biosample", id=biosample_id, retmode="xml")
-            biosample_records = Entrez.read(handle)
-            handle.close()
-            
-            if not biosample_records:
-                print(f"  WARNING: Empty BioSample record for {assembly_acc}")
-                return None
-            
-            # Parse attributes
-            biosample_record = biosample_records[0]
-            attributes = {}
-            
-            # Add BioSample accession
-            if 'Accession' in biosample_record:
-                attributes['biosample_accession'] = biosample_record['Accession']
-            
-            # Parse all attributes
-            if 'Attributes' in biosample_record:
-                for attr in biosample_record['Attributes']:
-                    attr_name = attr.get('attribute_name', 'unknown')
-                    attr_value = attr.get('content', '')
-                    if attr_name in KNOWN_ATTRIBUTES or attr_name == 'biosample_accession':
-                        attributes[attr_name] = attr_value
-            
-            return attributes
-            
+            return fetch_biosample_record(biosample_id, assembly_acc)
+
         except Exception as e:
             if attempt < max_retries:
                 print(f"  Attempt {attempt} failed: {e}. Retrying...")
@@ -105,7 +115,54 @@ def fetch_biosample_from_assembly(assembly_acc, max_retries=3):
             else:
                 print(f"  ERROR: Failed after {max_retries} attempts: {e}")
                 return None
-    
+
+    return None
+
+
+def fetch_biosample_from_nucleotide(nuc_acc, max_retries=3):
+    """
+    Fetch BioSample metadata from a nucleotide accession number
+
+    Args:
+        nuc_acc: Nucleotide accession number (e.g., FJ457244.1)
+        max_retries: Maximum number of retry attempts
+
+    Returns:
+        Dictionary of BioSample attributes or None if failed
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Search for nucleotide
+            handle = Entrez.esearch(db="nucleotide", term=nuc_acc)
+            record = Entrez.read(handle)
+            handle.close()
+
+            if not record['IdList']:
+                print(f"  WARNING: No nucleotide record found for {nuc_acc}")
+                return None
+
+            nuc_id = record['IdList'][0]
+
+            # Link to BioSample
+            handle = Entrez.elink(dbfrom="nucleotide", db="biosample", id=nuc_id)
+            link_record = Entrez.read(handle)
+            handle.close()
+
+            if not link_record[0]['LinkSetDb']:
+                print(f"  WARNING: No BioSample linked to {nuc_acc}")
+                return None
+
+            biosample_id = link_record[0]['LinkSetDb'][0]['Link'][0]['Id']
+            return fetch_biosample_record(biosample_id, nuc_acc)
+
+        except Exception as e:
+            if attempt < max_retries:
+                print(f"  Attempt {attempt} failed: {e}. Retrying...")
+                time.sleep(2)
+            else:
+                print(f"  ERROR: Failed after {max_retries} attempts: {e}")
+                return None
+
     return None
 
 
@@ -177,11 +234,13 @@ def write_tsv(data, output_file):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Fetch BioSample metadata from Assembly accessions'
+        description='Fetch BioSample metadata from Assembly or nucleotide accessions'
     )
-    parser.add_argument('input_file', help='Input file with Assembly accession numbers (one per line)')
+    parser.add_argument('input_file', help='Input file with accession numbers (one per line)')
     parser.add_argument('output_file', help='Output TSV file')
-    parser.add_argument('--email', default='user@example.com', 
+    parser.add_argument('--db', choices=['assembly', 'nucleotide'], default='assembly',
+                       help='NCBI database to search (default: assembly)')
+    parser.add_argument('--email', default='user@example.com',
                        help='Email for NCBI (required by NCBI policy)')
     parser.add_argument('--delay', type=float, default=0.5,
                        help='Delay between requests in seconds (default: 0.5)')
@@ -191,15 +250,17 @@ def main():
     # Set email for NCBI
     Entrez.email = args.email
     
+    db_label = args.db.capitalize()
     print("=" * 80)
-    print("Fetching BioSample metadata from Assembly accessions")
+    print(f"Fetching BioSample metadata from {db_label} accessions")
     print("=" * 80)
     print(f"Input file: {args.input_file}")
     print(f"Output file: {args.output_file}")
+    print(f"Database: {args.db}")
     print(f"Email: {args.email}")
     print()
     
-    # Read assembly accessions
+    # Read accessions
     try:
         with open(args.input_file, 'r') as f:
             accessions = [line.strip() for line in f if line.strip()]
@@ -209,19 +270,26 @@ def main():
     
     print(f"Total accessions to process: {len(accessions)}\n")
     
-    # Fetch metadata for each assembly
+    # Choose fetch function based on database
+    if args.db == 'nucleotide':
+        fetch_fn = fetch_biosample_from_nucleotide
+        accession_col = 'nucleotide_accession'
+    else:
+        fetch_fn = fetch_biosample_from_assembly
+        accession_col = 'assembly_accession'
+
+    # Fetch metadata for each accession
     all_data = []
     successful = 0
     failed = 0
-    
+
     for i, accession in enumerate(accessions, 1):
         print(f"[{i}/{len(accessions)}] Processing: {accession}")
-        
-        metadata = fetch_biosample_from_assembly(accession)
-        
+
+        metadata = fetch_fn(accession)
+
         if metadata:
-            # Add assembly accession to the record
-            metadata['assembly_accession'] = accession
+            metadata[accession_col] = accession
             all_data.append(metadata)
             successful += 1
         else:

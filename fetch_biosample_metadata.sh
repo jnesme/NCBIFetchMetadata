@@ -2,24 +2,33 @@
 
 ###############################################################################
 # Script: fetch_biosample_metadata.sh
-# Description: Fetch BioSample metadata from Assembly accession numbers
-#              and output as a clean TSV file with proper handling of commas
-# Usage: ./fetch_biosample_metadata.sh <input_file> <output_file>
+# Description: Fetch BioSample metadata from Assembly or nucleotide accession
+#              numbers and output as a clean TSV file with proper handling of commas
+# Usage: ./fetch_biosample_metadata.sh <input_file> <output_file> [assembly|nucleotide]
 # Example: ./fetch_biosample_metadata.sh AssemblyAcNu.txt BioSampleMetadata.tsv
+#          ./fetch_biosample_metadata.sh nuc_ids.txt output.tsv nucleotide
 ###############################################################################
 
 set -e  # Exit on error
 
 # Check arguments
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 <input_assembly_file> <output_tsv_file>"
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+    echo "Usage: $0 <input_file> <output_tsv_file> [assembly|nucleotide]"
     echo "Example: $0 AssemblyAcNu.txt BioSampleMetadata.tsv"
+    echo "         $0 nuc_ids.txt output.tsv nucleotide"
     exit 1
 fi
 
 INPUT_FILE="$1"
 OUTPUT_FILE="$2"
+DB="${3:-assembly}"
 TEMP_CSV="${OUTPUT_FILE%.tsv}_temp.csv"
+
+# Validate db argument
+if [ "$DB" != "assembly" ] && [ "$DB" != "nucleotide" ]; then
+    echo "Error: Invalid database '$DB'. Must be 'assembly' or 'nucleotide'."
+    exit 1
+fi
 
 # Check if input file exists
 if [ ! -f "$INPUT_FILE" ]; then
@@ -35,10 +44,11 @@ if ! command -v esearch &> /dev/null; then
 fi
 
 echo "========================================================================"
-echo "Fetching BioSample metadata from Assembly accessions"
+echo "Fetching BioSample metadata from ${DB} accessions"
 echo "========================================================================"
 echo "Input file: $INPUT_FILE"
 echo "Output file: $OUTPUT_FILE"
+echo "Database: $DB"
 echo "Total accessions: $(wc -l < $INPUT_FILE)"
 echo ""
 
@@ -59,7 +69,7 @@ while read -r accession; do
     
     # Retry logic (up to 3 attempts)
     for attempt in 1 2 3; do
-        result=$(esearch -db assembly -query "$accession" 2>/dev/null | 
+        result=$(esearch -db "$DB" -query "$accession" 2>/dev/null |
                  elink -target biosample 2>/dev/null | 
                  efetch -format xml 2>/dev/null | 
                  xtract -pattern BioSample -element accession -block Attributes -group Attribute -element Attribute@attribute_name Attribute 2>/dev/null | 
